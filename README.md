@@ -1,9 +1,12 @@
 # abcjs-wp-plugin
-Adaptation of Paul Rosen's abcjs plugin version for wordpress
+Adaptation of Paul Rosen's abcjs plugin version for wordpress.
+
+Different way I tried to include the features for the wonderful library abcjs.
 
 # Features
-* [x] Editor: create div from shortcode abc
+
 * [x] add transpose
+* [ ] Editor: create div from shortcode abc
 
 # Editor shortcode
 ````
