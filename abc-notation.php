@@ -127,7 +127,25 @@ function construct_divs($number_of_tunes, $type, $class) {
 		$output = $output . '<div id="' . $id . '" class="' . $class . ' abcjs-tune-number-' . $i .'"></div>' . "\n";
 		$ids = $ids . "'" . $id . "',";
 	}
-	$output = $output . "<div id='abc-audio-" . $txtuniqid . "'></div><textarea id='abc-txt-" . $txtuniqid . "'>". $originalABCv2 ."</textarea></div>";
+	$hiddenControls = <<<EOD
+	  <details class='abc-details'><summary><b>ABC + options</b></summary>
+	<label for="abc-sel-transpose-$txtuniqid">Transposer</label>
+	<select id="abc-sel-transpose-$txtuniqid">
+		<option value="1">0</option>
+		<option value="1">1</option>
+		<option value="1">2</option>
+		<option value="1">3</option>
+		<option value="1">-1</option>
+		<option value="1">-2</option>
+		<option value="1">3</option>
+	</select>
+	
+	<textarea id='abc-txt-$txtuniqid'>$originalABCv2</textarea>
+	</details>
+	EOD;
+	$output = $output . "<div id='abc-audio-" . $txtuniqid . "'></div>
+	". $hiddenControls ."
+	</div>";
 	return array( 'output' => $output, 'ids' => $ids );
 }
 
@@ -281,11 +299,34 @@ function abcjs_create_audio( $atts, $content ) {
 
 	global $originalABC;
 	global $uniqid;
+	//$stroptions = preg_replace("&\'&", "\\'", $a['options']);
+	$stroptions = $a['options'];
+	// $hiddencontrols = <<<EOD
+// <details style='padding:20px'>
+    // <summary><b>ABC code</b></summary>
+	// <div style='border:1px solid grey'>$originalABC</div>
+// <br/></details><button id='$uniqid-test' onclick="var params = $stroptions; var abc = '$content2'.replace(/\x01/g,'\n'); var newVisObj = ABCJS.renderAbc('abcjs-paper-$uniqid',abc,{visualTranspose: 6, }, params); ">TestMidi2</button>
+
+// <br/>
+
+// EOD;
+	
+	//$output = $output . $hiddencontrols ;
 	$output = $output . "<details style='padding:20px'>
     <summary><b>ABC code</b></summary>
 	<div style='border:1px solid grey'>".$originalABC."</div>
-</details>
-<br/><button id='".  $uniqid .'-test\' onclick="var params = ' . $a['options'] . '; var abc = \'' . $content2 . '\'.replace(/\x01/g,\'\n\');  var newVisObj = ABCJS.renderAbc(\'abcjs-paper-' . $uniqid . '\',abc,{visualTranspose: 6, }, params); ">TestMidi2</button>';
+</details>".'
+<label for="abc-sel-transpose-'.$uniqid.'">Transposer</label>
+	<select id="abc-sel-transpose-'. $uniqid .'">
+		<option value="0">0</option>
+		<option value="1">1</option>
+		<option value="2">2</option>
+		<option value="3">3</option>
+		<option value="-1">-1</option>
+		<option value="-2">-2</option>
+		<option value="-3">-3</option>
+	</select>'."
+<br/><button id='".  $uniqid .'-test\' onclick="var params = ' . $a['options'] . '; var abc = \'' . $content2 . '\'.replace(/\x01/g,\'\n\');  var newVisObj = ABCJS.renderAbc(\'abcjs-paper-' . $uniqid . '\',abc,{visualTranspose: parseInt(getElementById(\'abc-sel-transpose-'. $uniqid .'\').value, 10), }, params); ">Appliquer</button>';
 //<br/><button id='".  $uniqid .'-test\' onclick="var params = ' . $a['options'] . '; var abc = \'' . $content2 . '\'.replace(/\x01/g,\'\n\'); var output = ABCJS.strTranspose(abc,\'abcjs-paper-' . $uniqid . '\', 2); var newVisObj = ABCJS.renderAbc(\'abcjs-paper-' . $uniqid . '\',output,{visualTranspose: 6, }, params); ABCJS.synth.createSynth(newVisObj[0]);">TestMidi2</button>'
 
 	return $output;
