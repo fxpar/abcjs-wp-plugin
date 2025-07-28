@@ -47,3 +47,15 @@ eB B2 eBgB|eB B2 defg|afe^c dBAF|DEFD E2:|
 [/abcjs-audio]
 ````
 
+# Ukulele tabs
+
+Requested a real and correct inclusion of ukulele (GCEA) and ukulele low G (gCEA) : https://github.com/paulrosen/abcjs/issues/1103
+
+````
+ viola: {
+     name: "StringTab",
+     defaultTuning: ["G,","C","E","A"],
+     isTabBig: !1,
+     tabSymbolOffset: 0
+ },
+````
