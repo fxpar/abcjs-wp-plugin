@@ -5,8 +5,12 @@ Different way I tried to include the features for the wonderful library abcjs.
 
 # Features
 
-* [x] add transpose
-* [ ] Editor: create div from shortcode abc
+#### abc-notation.php
+* [x] add instrument
+* [x] Editor: create div from shortcode abc
+
+#### abcjs-basic-min.js
+* [x] include ukulele tuning GCEA (replaced viola)
 
 # Editor shortcode
 ````
