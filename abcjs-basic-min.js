@@ -9591,40 +9591,11 @@
                             f += '<span class="abcjs-tempo-wrapper"><label><input class="abcjs-midi-tempo" type="number" min="1" max="300" value="100" title="' + b + '" aria-label="' + (t.warpAria ? t.warpAria : b) + '">%</label><span>&nbsp;(<span class="abcjs-midi-current-tempo"></span> ' + (t.bpm ? t.bpm : "BPM") + ")</span></span>\n"
                         }
 						var parentId = e.id;
-						f += `<button type="button" title="more..." class="abcjs-btn" style="color:white" onclick="var x = document.getElementById('`+parentId+`more');if (x.style.display === 'none'){x.style.display = 'block'}else{x.style.display ='none'};"> ⋮</button>`
+						var moreid = parentId.split("-")[2];
+						f += `<button type="button" title="more..." class="abcjs-btn" style="color:white" onclick="var x = document.getElementById('abc-more-`+moreid+`');if (x.style.display === 'none'){x.style.display = 'block'}else{x.style.display ='none'};"> ⋮ </button>`
                         f += '<div class="abcjs-css-warning" style="font-size: 12px;color:red;border: 1px solid red;text-align: center;width: 300px;margin-top: 4px;font-weight: bold;border-radius: 4px;">CSS required: load abcjs-audio.css</div>',
                         f += "</div>\n",
-						f += `<div class="" id="`+parentId+`more" style="display:none; color:white; background-color:black; padding:10px">
-					  
-					   <button onclick="(function(t) { u(e.options.playPromiseHandler || e.options.playHandler, t, s, e.options.afterResume, !!e.options.playPromiseHandler) })();">Test U</button>
-					   <button onclick="abcjs.midi.startPlaying(document.getElementById('`+parentId+`'));">Test play</button>
-					   <button onclick="abcjs.renderMidi('`+parentId+`', abcString,{chordsOff: true, generateDownload: true, });">Test</button>
-					   <br/>
-					   <label for="chordsOff">Chords off</label>
-					   <input type="checkbox" id="chordsOff" name="chordsOff" value="chordsOff" />
-						<label for="transpose">Transposer:</label>
-					<select name="transpose" id="transpose">
-					<option value="0">0</option>
-					  <option value="1">1</option>
-					  <option value="2">2</option>
-					  <option value="-1">-1</option>
-					  <option value="-2">-2</option>
-					</select>
-					<br/>
-						<label for="metronome">Metronome:</label>
-						 <input type="checkbox" id="metronome" name="metronome" value="metronome" />
-						<label for="transpose">Number intro bar:</label>
-					<select name="num-intro-bars" >
-					  <option value="1">0</option>
-					  <option value="2">1</option>
-					  <option value="-1">2</option>
-					  
-					</select>
-						
-						<br/>
-						<button>download midi</button>
-						<button>download pdf</button>
-					  </div>`;
+						f += ``;
                         e.innerHTML = f
                     }
                         (r.parent, r.options), function (e) {
