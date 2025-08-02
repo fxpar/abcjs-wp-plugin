@@ -13,6 +13,7 @@ Different way I tried to include the features for the wonderful library abcjs.
 * [x] include ukulele tuning GCEA (replaced viola)
 
 # Editor shortcode
+Current version works very well with editor shortcode.
 ````
 [abcjs-editor  options="{ responsive: 'resize', tablature: &#91;{instrument: 'violin' }&#93;}"  ]
 X: 1
@@ -30,7 +31,7 @@ eB B2 eBgB|eB B2 defg|afe^c dBAF|DEFD E2:|
 ````
 
 # Audio shortcode
-
+Current version buggy for the audio shortcode.
 ````
 [abcjs-audio class-audio="abcjs-audio" animate="true" params="{ responsive: 'resize', tablature: &#91;{instrument: 'viola' }&#93;  }"  ]
 X: 1
