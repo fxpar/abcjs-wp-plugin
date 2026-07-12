@@ -561,14 +561,25 @@ function abcjs_editor_shortcode( $atts, $content ) {
 		$output .= $animate_callback;
 	}
 	
+/// début coupure
+	
 	$output .= '
 	console.log("ABC Content (Editor):", "' . $abc_string_escaped . '".replace(/\\x01/g,"\\\\n"));
 	var editor;
 	var editorOptions = ' . $options . ';
+	
+	// 1. On détermine si chordsOff est activé dans le shortcode (gère le booléen ou la chaîne "true")
+	var isChordsOffDefault = editorOptions && (editorOptions.chordsOff === true || editorOptions.chordsOff === "true");
+	
 	var visualTransposeEl = document.querySelector("#abc-sel-transpose-' . $uniqid . '");
 	var audioTransposeEl = document.querySelector("#abc-sel-transpose-' . $uniqid . '");
-	var chordsOff = document.querySelector("#chordsoff-value-' . $uniqid . '");
+	var chordsOffCheckbox = document.querySelector("#chordsoff-value-' . $uniqid . '");
 	var swingElement = document.querySelector("#swing-value-' . $uniqid . '");
+	
+	// 2. On synchronise la case à cocher HTML pour qu\'elle reflète le shortcode dès le départ
+	if (chordsOffCheckbox) {
+		chordsOffCheckbox.checked = isChordsOffDefault;
+	}
 	
 	editor = new ABCJS.Editor("' . $textarea_id . '", {
 	  canvas_id: "' . $paper_id . '",
@@ -577,7 +588,10 @@ function abcjs_editor_shortcode( $atts, $content ) {
 	    el: "#' . $audio_id . '",
 	    cursorControl: ' . $animate_param . ',
 	    options: { displayLoop: true, displayRestart: true, displayPlay: true, displayProgress: true, displayWarp: true },
-	    synthParams: Object.assign({ chordsOff: false }, editorOptions)
+	    synthParams: {
+	      chordsOff: editorOptions.chordsOff === true || editorOptions.chordsOff === "true",
+	      options: editorOptions
+	    }
 	  }
 	});
 	
@@ -585,14 +599,22 @@ function abcjs_editor_shortcode( $atts, $content ) {
 	  var renderParams = { selectTypes: false, responsive: "resize", visualTranspose: parseInt(visualTransposeEl.value, 10) };
 	  editor.paramChanged(renderParams);
 	  
+	  // 4. Ici, chordsOffCheckbox.checked renverra bien "true" si elle a été initialisée cochée
 	  var synthParams = Object.assign({}, editorOptions, {
 	    midiTranspose: parseInt(audioTransposeEl.value, 10),
-	    chordsOff: chordsOff.checked,
+	    chordsOff: chordsOffCheckbox ? chordsOffCheckbox.checked : false,
 	    swing: parseFloat(swingElement.value, 10)
 	  });
+	
+	  
+	 
+	  
 	  
 	  editor.synthParamChanged(synthParams);
 	});
+
+ /// fin coupure
+
 
 	// ÉCOUTEUR SUR LA PARTITION : Pilote directement linstance audio de léditeur
 	setTimeout(function() {
