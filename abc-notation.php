@@ -362,7 +362,8 @@ function abcjs_audio_shortcode( $atts, $content ) {
 	$output .= 'var abc = "' . $abc_string_escaped . '";' . "\n";
 	$output .= 'var visualObjs = ABCJS.renderAbc(paperIds, abc, options);' . "\n";
 	
-	$output .= 'if (visualObjs && visualObjs.length > 0) {' . "\n";
+	// $output .= 'if (visualObjs && visualObjs.length > 0) {' . "\n";
+	$output .= 'if (visualObjs?.length > 0) {' . "\n";
 	$output .= '  var synthControl = new ABCJS.synth.SynthController();' . "\n";
 	$output .= '  synthControl.load(document.getElementById(audioIds[0]), ' . $animate_param . ', {displayLoop: true, displayRestart: true, displayPlay: true, displayProgress: true, displayWarp: true});' . "\n";
 	$output .= '  synthControl.disable(true);' . "\n";
@@ -374,7 +375,8 @@ function abcjs_audio_shortcode( $atts, $content ) {
 	// LE DECLENCHEUR AU CLIC SUR LA PARTITION
 	$output .= '      var paperEl = document.getElementById(paperIds[0]);' . "\n";
 	$output .= '      var audioEl = document.getElementById(audioIds[0]);' . "\n";
-	$output .= '      if (paperEl && audioEl) {' . "\n";
+	//$output .= '      if (paperEl && audioEl) {' . "\n";
+	$output .= '      if (paperEl) if (audioEl) {' . "\n";
 	$output .= '        paperEl.style.cursor = "pointer";' . "\n";
 	$output .= '        paperEl.addEventListener("click", function() {' . "\n";
 	$output .= '          var playButton = audioEl.querySelector(".abcjs-play");' . "\n";
@@ -426,7 +428,8 @@ function abcjs_get_cursor_control( $selector ) {
 		};
 		self.beatSubdivisions = 2;
 		self.onEvent = function(ev) {
-			if (ev.measureStart && ev.left === null) return;
+			//if (ev.measureStart && ev.left === null) return;
+			if (ev.measureStart) if (ev.left === null) return;
 			var lastSelection = document.querySelectorAll("#" + selector + " svg .highlight");
 			for (var k = 0; k < lastSelection.length; k++) {
 				lastSelection[k].classList.remove("highlight");
@@ -569,7 +572,16 @@ function abcjs_editor_shortcode( $atts, $content ) {
 	var editorOptions = ' . $options . ';
 	
 	// 1. On détermine si chordsOff est activé dans le shortcode (gère le booléen ou la chaîne "true")
-	var isChordsOffDefault = editorOptions && (editorOptions.chordsOff === true || editorOptions.chordsOff === "true");
+	//var isChordsOffDefault = editorOptions && (editorOptions.chordsOff === true || editorOptions.chordsOff === "true");
+	
+	var isChordsOffDefault = editorOptions ? (editorOptions.chordsOff === true || editorOptions.chordsOff === "true") : false;
+	// On initialise la variable à false par défaut
+var isChordsOffDefault = false; 
+
+// On vérifie si editorOptions existe
+if (editorOptions) { 
+    isChordsOffDefault = (editorOptions.chordsOff === true || editorOptions.chordsOff === "true");
+}
 	
 	var visualTransposeEl = document.querySelector("#abc-sel-transpose-' . $uniqid . '");
 	var audioTransposeEl = document.querySelector("#abc-sel-transpose-' . $uniqid . '");
@@ -619,7 +631,8 @@ function abcjs_editor_shortcode( $atts, $content ) {
 	// ÉCOUTEUR SUR LA PARTITION : Pilote directement linstance audio de léditeur
 	setTimeout(function() {
 		var paperEl = document.getElementById("' . $paper_id . '");
-		if (paperEl && editor && editor.synth) {
+		//if (paperEl && editor && editor.synth) {
+		if (paperEl) if (editor?.synth) {
 			paperEl.addEventListener("click", function(e) {
 				e.preventDefault();
 				e.stopPropagation();
@@ -642,6 +655,7 @@ function abcjs_editor_shortcode( $atts, $content ) {
 	';
 	
 	$output .= abcjs_close_js_section();
+	
 	
 	return $output;
 }
