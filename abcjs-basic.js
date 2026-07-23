@@ -1,5 +1,3 @@
-/*! abcjs_basic v6.6.3 Copyright © 2009-2025 Paul Rosen and Gregory Dyke (https://abcjs.net) */
-/*! For license information please see abcjs_basic.LICENSE */
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
 		module.exports = factory();
@@ -205,10 +203,6 @@ var TimingCallbacks = function TimingCallbacks(target, params) {
   var self = this;
   if (!params) params = {};
   self.qpm = params.qpm ? parseInt(params.qpm, 10) : null;
-  if (!self.qpm) {
-    var tempo = target.metaText ? target.metaText.tempo : null;
-    self.qpm = target.getBpm(tempo);
-  }
   self.extraMeasuresAtBeginning = params.extraMeasuresAtBeginning ? parseInt(params.extraMeasuresAtBeginning, 10) : 0;
   self.beatCallback = params.beatCallback; // This is called for each beat.
   self.eventCallback = params.eventCallback; // This is called for each note or rest encountered.
@@ -218,6 +212,10 @@ var TimingCallbacks = function TimingCallbacks(target, params) {
   if (!self.beatSubdivisions) self.beatSubdivisions = 1;
   self.joggerTimer = null;
   self.replaceTarget = function (newTarget) {
+    if (!params.qpm) {
+      var tempo = newTarget.metaText ? newTarget.metaText.tempo : null;
+      self.qpm = newTarget.getBpm(tempo);
+    }
     self.noteTimings = newTarget.setTiming(self.qpm, self.extraMeasuresAtBeginning);
     if (newTarget.noteTimings.length === 0) self.noteTimings = newTarget.setTiming(0, 0);
     if (self.lineEndCallback) {
@@ -444,14 +442,40 @@ var TimingCallbacks = function TimingCallbacks(target, params) {
           startTime: self.startTime
         };
       }
-      var thisStartTime = self.startTime; // the beat callback can call seek and change the position from beneath us.
-      self.beatCallback(self.beatStarts[self.currentBeat].b, self.totalBeats / self.beatSubdivisions, self.lastMoment, position, debugInfo);
-      if (thisStartTime !== self.startTime) {
-        return timestamp - self.startTime;
-      } // else
-      // 	self.currentBeat++;
-    }
 
+      // there is a case where self.beatStarts[self.currentBeat] doesn't exist, but I don't know how. Give more info in that case for better debugging.
+      if (self.currentBeat < 0 || self.currentBeat >= self.beatStarts.length || !self.beatStarts[self.currentBeat]) {
+        var obj = {
+          currentBeat: self.currentBeat,
+          beatStartLength: self.beatStarts.length,
+          totalBeats: self.totalBeats,
+          startTime: self.startTime,
+          currentTime: self.currentTime,
+          lastMoment: self.lastMoment,
+          lastTimestamp: self.lastTimestamp,
+          qpm: self.qpm,
+          millisecondsPerBeat: self.millisecondsPerBeat,
+          beatSubdivisions: self.beatSubdivisions,
+          currentEvent: self.currentEvent,
+          currentLine: self.currentLine,
+          isPaused: self.isPaused,
+          isRunning: self.isRunning,
+          pausedPercent: self.pausedPercent,
+          justUnpaused: self.justUnpaused,
+          newSeekPercent: self.newSeekPercent
+        };
+        setTimeout(function () {
+          // throw the error outside of the normal processing so that everything else continues working.
+          throw new Error("abcjs-timing-callback error: " + JSON.stringify(obj));
+        }, 1);
+      } else {
+        var thisStartTime = self.startTime; // the beat callback can call seek and change the position from beneath us.
+        self.beatCallback(self.beatStarts[self.currentBeat].b, self.totalBeats / self.beatSubdivisions, self.lastMoment, position, debugInfo);
+        if (thisStartTime !== self.startTime) {
+          return timestamp - self.startTime;
+        }
+      }
+    }
     return null;
   };
 
@@ -3222,6 +3246,8 @@ var Parse = function Parse() {
       }
       strTune = arr.join("  "); //. the split removed two characters, so this puts them back
     }
+    // If there is an escaped percent, then temporarily change it so it doesn't affect the processing.
+    strTune = strTune.replace(/\\%/g, "\u200B\uFF05");
     // take care of line continuations right away, but keep the same number of characters
     strTune = strTune.replace(/\\([ \t]*)(%.*)*\n/g, function (all, backslash, comment) {
       var padding = comment ? Array(comment.length + 1).join(' ') : "";
@@ -5213,7 +5239,7 @@ var ParseHeader = function ParseHeader(tokenizer, warn, multilineVars, tune, tun
           return [e - i + 1 + ws];
         case "[M:":
           var meter = this.setMeter(line.substring(i + 3, e));
-          if (tuneBuilder.hasBeginMusic() && meter) tuneBuilder.appendStartingElement('meter', startChar, endChar, meter);else multilineVars.meter = meter;
+          if (startLine && multilineVars.currentVoice && meter) multilineVars.staves[multilineVars.currentVoice.staffNum].meter = meter;else if (tuneBuilder.hasBeginMusic() && meter) tuneBuilder.appendStartingElement('meter', startChar, endChar, meter);else multilineVars.meter = meter;
           return [e - i + 1 + ws];
         case "[K:":
           var result = parseKeyVoice.parseKey(line.substring(i + 3, e), true);
@@ -5684,7 +5710,16 @@ var parseKeyVoice = {};
     key.accidentals.forEach(function (k) {
       ret.accidentals.push(Object.assign({}, k));
     });
+    if (key.explicitAccidentals) {
+      ret.explicitAccidentals = [];
+      key.explicitAccidentals.forEach(function (k) {
+        ret.explicitAccidentals.push(Object.assign({}, k));
+      });
+    }
     return ret;
+  };
+  var setVoiceKey = function setVoiceKey() {
+    if (multilineVars.currentVoice) multilineVars.currentVoice.key = parseKeyVoice.deepCopyKey(multilineVars.key);
   };
   var pitches = {
     A: 5,
@@ -5816,6 +5851,10 @@ var parseKeyVoice = {};
         };
         ret.foundKey = true;
         tokens.shift();
+        if (!isInline) {
+          multilineVars.globalKey = parseKeyVoice.deepCopyKey(multilineVars.key);
+        }
+        setVoiceKey();
         break;
       case 'Hp':
         parseDirective.addDirective("bagpipes");
@@ -5836,6 +5875,10 @@ var parseKeyVoice = {};
         };
         ret.foundKey = true;
         tokens.shift();
+        if (!isInline) {
+          multilineVars.globalKey = parseKeyVoice.deepCopyKey(multilineVars.key);
+        }
+        setVoiceKey();
         break;
       case 'none':
         // we got the none key - that's the same as C to us
@@ -5847,6 +5890,10 @@ var parseKeyVoice = {};
         };
         ret.foundKey = true;
         tokens.shift();
+        if (!isInline) {
+          multilineVars.globalKey = parseKeyVoice.deepCopyKey(multilineVars.key);
+        }
+        setVoiceKey();
         break;
       default:
         var retPitch = tokenizer.getKeyPitch(tokens[0].token);
@@ -5907,6 +5954,10 @@ var parseKeyVoice = {};
               }
             }
           }
+          if (!isInline) {
+            multilineVars.globalKey = parseKeyVoice.deepCopyKey(multilineVars.key);
+          }
+          setVoiceKey();
         }
         break;
     }
@@ -5958,6 +6009,10 @@ var parseKeyVoice = {};
           }
         }
       }
+      if (!isInline) {
+        multilineVars.globalKey = parseKeyVoice.deepCopyKey(multilineVars.key);
+      }
+      setVoiceKey();
     }
 
     // Now see if any optional parameters are present. They have the form "key=value", except that "clef=" is optional
@@ -6185,6 +6240,7 @@ var parseKeyVoice = {};
     }
 
     multilineVars.currentVoice = currentVoice;
+    if (currentVoice.key) multilineVars.key = parseKeyVoice.deepCopyKey(currentVoice.key);else if (multilineVars.globalKey) multilineVars.key = parseKeyVoice.deepCopyKey(multilineVars.globalKey);
     return tuneBuilder.setCurrentVoice(currentVoice.staffNum, currentVoice.index, id);
   };
   parseKeyVoice.parseVoice = function (line, i, e) {
@@ -14233,9 +14289,13 @@ ChordTrack.prototype.interpretChord = function (name) {
   };
 };
 ChordTrack.prototype.chordNotes = function (bass, modifier) {
-  var intervals = this.chordIntervals[modifier];
+  // accept either chord spelling
+  modifier = modifier.replace(/♭/g, 'b').replace(/♯/g, '#');
+  var intervals = chordIntervals[modifier];
   if (!intervals) {
-    if (modifier.slice(0, 2).toLowerCase() === 'ma' || modifier[0] === 'M') intervals = this.chordIntervals.M;else if (modifier[0] === 'm' || modifier[0] === '-') intervals = this.chordIntervals.m;else intervals = this.chordIntervals.M;
+    // If the chord isn't in our list, we can at least guess
+    // whether it is major or minor.
+    if (modifier.slice(0, 2).toLowerCase() === 'ma' || modifier[0] === 'M') intervals = chordIntervals.M;else if (modifier[0] === 'm' || modifier[0] === '-') intervals = chordIntervals.m;else intervals = chordIntervals.M;
   }
   bass += 12; // the chord is an octave above the bass note.
 
@@ -14398,7 +14458,7 @@ function extractNote(chord, index) {
   // This creates an arpeggio note no matter how many notes are in the chord - if it runs out of notes it continues in the next octave
   var octave = Math.floor(index / chord.chick.length);
   var note = chord.chick[index % chord.chick.length];
-  //console.log(chord.chick, {index, octave, note}, index % chord.chick.length)
+  //console.log(chord.chick, {index, octave, note, index % chord.chick.length)
   return note + octave * 12;
 }
 function parseGChord(gchord) {
@@ -14490,118 +14550,366 @@ ChordTrack.prototype.basses = {
   'F': 41,
   'G': 43
 };
-ChordTrack.prototype.chordIntervals = {
-  // diminished (all flat 5 chords)
-  'dim': [0, 3, 6],
-  '°': [0, 3, 6],
-  '˚': [0, 3, 6],
-  'dim7': [0, 3, 6, 9],
-  '°7': [0, 3, 6, 9],
-  '˚7': [0, 3, 6, 9],
-  'ø7': [0, 3, 6, 10],
-  'm7(b5)': [0, 3, 6, 10],
-  'm7b5': [0, 3, 6, 10],
-  'm7♭5': [0, 3, 6, 10],
-  '-7(b5)': [0, 3, 6, 10],
-  '-7b5': [0, 3, 6, 10],
-  '7b5': [0, 4, 6, 10],
-  '7(b5)': [0, 4, 6, 10],
-  '7♭5': [0, 4, 6, 10],
-  '7(b9,b5)': [0, 4, 6, 10, 13],
-  '7b9,b5': [0, 4, 6, 10, 13],
-  '7(#9,b5)': [0, 4, 6, 10, 15],
-  '7#9b5': [0, 4, 6, 10, 15],
-  'maj7(b5)': [0, 4, 6, 11],
-  'maj7b5': [0, 4, 6, 11],
-  '13(b5)': [0, 4, 6, 10, 14, 21],
-  '13b5': [0, 4, 6, 10, 14, 21],
-  // minor (all normal 5, minor 3 chords)
-  'm': [0, 3, 7],
-  '-': [0, 3, 7],
-  'm6': [0, 3, 7, 9],
-  '-6': [0, 3, 7, 9],
-  'm7': [0, 3, 7, 10],
-  '-7': [0, 3, 7, 10],
-  '-(b6)': [0, 3, 7, 8],
-  '-b6': [0, 3, 7, 8],
-  '-6/9': [0, 3, 7, 9, 14],
-  '-7(b9)': [0, 3, 7, 10, 13],
-  '-7b9': [0, 3, 7, 10, 13],
-  '-maj7': [0, 3, 7, 11],
-  '-9+7': [0, 3, 7, 11, 13],
-  '-11': [0, 3, 7, 11, 14, 17],
-  'm11': [0, 3, 7, 11, 14, 17],
-  '-maj9': [0, 3, 7, 11, 14],
-  '-∆9': [0, 3, 7, 11, 14],
-  'mM9': [0, 3, 7, 11, 14],
-  // major (all normal 5, major 3 chords)
-  'M': [0, 4, 7],
-  '6': [0, 4, 7, 9],
-  '6/9': [0, 4, 7, 9, 14],
-  '6add9': [0, 4, 7, 9, 14],
-  '69': [0, 4, 7, 9, 14],
-  '7': [0, 4, 7, 10],
-  '9': [0, 4, 7, 10, 14],
-  '11': [0, 7, 10, 14, 17],
-  '13': [0, 4, 7, 10, 14, 21],
-  '7b9': [0, 4, 7, 10, 13],
-  '7♭9': [0, 4, 7, 10, 13],
-  '7(b9)': [0, 4, 7, 10, 13],
-  '7(#9)': [0, 4, 7, 10, 15],
-  '7#9': [0, 4, 7, 10, 15],
-  '(13)': [0, 4, 7, 10, 14, 21],
-  '7(9,13)': [0, 4, 7, 10, 14, 21],
-  '7(#9,b13)': [0, 4, 7, 10, 15, 20],
-  '7(#11)': [0, 4, 7, 10, 14, 18],
-  '7#11': [0, 4, 7, 10, 14, 18],
-  '7(b13)': [0, 4, 7, 10, 20],
-  '7b13': [0, 4, 7, 10, 20],
-  '9(#11)': [0, 4, 7, 10, 14, 18],
-  '9#11': [0, 4, 7, 10, 14, 18],
-  '13(#11)': [0, 4, 7, 10, 18, 21],
-  '13#11': [0, 4, 7, 10, 18, 21],
-  'maj7': [0, 4, 7, 11],
-  '∆7': [0, 4, 7, 11],
-  'Δ7': [0, 4, 7, 11],
-  'maj9': [0, 4, 7, 11, 14],
-  'maj7(9)': [0, 4, 7, 11, 14],
-  'maj7(11)': [0, 4, 7, 11, 17],
-  'maj7(#11)': [0, 4, 7, 11, 18],
-  'maj7(13)': [0, 4, 7, 14, 21],
-  'maj7(9,13)': [0, 4, 7, 11, 14, 21],
-  '7sus4': [0, 5, 7, 10],
-  'm7sus4': [0, 3, 7, 10, 17],
-  'sus4': [0, 5, 7],
-  'sus2': [0, 2, 7],
-  '7sus2': [0, 2, 7, 10],
-  '9sus4': [0, 5, 7, 10, 14],
-  '13sus4': [0, 5, 7, 10, 14, 21],
-  // augmented (all sharp 5 chords)
-  'aug7': [0, 4, 8, 10],
-  '+7': [0, 4, 8, 10],
-  '+': [0, 4, 8],
-  '7#5': [0, 4, 8, 10],
-  '7♯5': [0, 4, 8, 10],
-  '7+5': [0, 4, 8, 10],
-  '9#5': [0, 4, 8, 10, 14],
-  '9♯5': [0, 4, 8, 10, 14],
-  '9+5': [0, 4, 8, 10, 14],
-  '-7(#5)': [0, 3, 8, 10],
-  '-7#5': [0, 3, 8, 10],
-  '7(#5)': [0, 4, 8, 10],
-  '7(b9,#5)': [0, 4, 8, 10, 13],
-  '7b9#5': [0, 4, 8, 10, 13],
-  'maj7(#5)': [0, 4, 8, 11],
-  'maj7#5': [0, 4, 8, 11],
-  'maj7(#5,#11)': [0, 4, 8, 11, 18],
-  'maj7#5#11': [0, 4, 8, 11, 18],
-  '9(#5)': [0, 4, 8, 10, 14],
-  '13(#5)': [0, 4, 8, 10, 14, 21],
-  '13#5': [0, 4, 8, 10, 14, 21],
-  // MAE Power chords added 10 April 2024
-  '5': [0, 7],
-  '5(8)': [0, 7, 12],
-  '5add8': [0, 7, 12]
+var chordIntervals = {
+  // unusual chords
+  "-addb2": [0, 1, 3, 7],
+  "maddb2": [0, 1, 3, 7],
+  "addb2": [0, 1, 4, 7],
+  "susb2": [0, 1, 7],
+  "-add2": [0, 2, 3, 7],
+  "madd2": [0, 2, 3, 7],
+  "add2": [0, 2, 4, 7],
+  "sus2": [0, 2, 7],
+  "-7sus2": [0, 2, 7, 10],
+  "7sus2": [0, 2, 7, 10],
+  "m7sus2": [0, 2, 7, 10],
+  "min7sus2": [0, 2, 7, 10],
+  "7sus2/9": [0, 2, 7, 10, 14],
+  "add#2": [0, 3, 4, 7],
+  "-add4": [0, 3, 5, 7],
+  "madd4": [0, 3, 5, 7],
+  // diminished chords
+  "dim": [0, 3, 6],
+  "m(b5)": [0, 3, 6],
+  "°": [0, 3, 6],
+  "˚": [0, 3, 6],
+  "-add#4": [0, 3, 6, 7],
+  "madd#4": [0, 3, 6, 7],
+  "dim7": [0, 3, 6, 9],
+  "°7": [0, 3, 6, 9],
+  "˚7": [0, 3, 6, 9],
+  "-7(b5)": [0, 3, 6, 10],
+  "-7b5": [0, 3, 6, 10],
+  "m7(b5)": [0, 3, 6, 10],
+  "m7b5": [0, 3, 6, 10],
+  "ø": [0, 3, 6, 10],
+  "ø7": [0, 3, 6, 10],
+  // minor chords
+  "-": [0, 3, 7],
+  "m": [0, 3, 7],
+  "-(b6)": [0, 3, 7, 8],
+  "-b6": [0, 3, 7, 8],
+  "m(b6)": [0, 3, 7, 8],
+  "mb6": [0, 3, 7, 8],
+  "-6": [0, 3, 7, 9],
+  "m6": [0, 3, 7, 9],
+  "-6(9)": [0, 3, 7, 9, 14],
+  "-6/9": [0, 3, 7, 9, 14],
+  "-69": [0, 3, 7, 9, 14],
+  "m6(9)": [0, 3, 7, 9, 14],
+  "m6/9": [0, 3, 7, 9, 14],
+  "m69": [0, 3, 7, 9, 14],
+  "-7": [0, 3, 7, 10],
+  "m7": [0, 3, 7, 10],
+  "-7(b9)": [0, 3, 7, 10, 13],
+  "-7b9": [0, 3, 7, 10, 13],
+  "-7(9)": [0, 3, 7, 10, 14],
+  "-7/9": [0, 3, 7, 10, 14],
+  "-9": [0, 3, 7, 10, 14],
+  "m7(9)": [0, 3, 7, 10, 14],
+  "m7/9": [0, 3, 7, 10, 14],
+  "m9": [0, 3, 7, 10, 14],
+  "-7(9,11)": [0, 3, 7, 10, 14, 17],
+  "-7/9/11": [0, 3, 7, 10, 14, 17],
+  "m7(9,11)": [0, 3, 7, 10, 14, 17],
+  "m7/9/11": [0, 3, 7, 10, 14, 17],
+  "-13": [0, 3, 7, 10, 14, 17, 21],
+  "-7(9,11,13)": [0, 3, 7, 10, 14, 17, 21],
+  "-7/9/11/13": [0, 3, 7, 10, 14, 17, 21],
+  "m13": [0, 3, 7, 10, 14, 17, 21],
+  "m7(9,11,13)": [0, 3, 7, 10, 14, 17, 21],
+  "m7/9/11/13": [0, 3, 7, 10, 14, 17, 21],
+  "-7(9,13)": [0, 3, 7, 10, 14, 21],
+  "-7/9/13": [0, 3, 7, 10, 14, 21],
+  "m7(9,13)": [0, 3, 7, 10, 14, 21],
+  "m7/9/13": [0, 3, 7, 10, 14, 21],
+  "-7(11)": [0, 3, 7, 10, 17],
+  "-7/11": [0, 3, 7, 10, 17],
+  "m7(11)": [0, 3, 7, 10, 17],
+  "m7/11": [0, 3, 7, 10, 17],
+  "-7(11,13)": [0, 3, 7, 10, 17, 21],
+  "-7/11/13": [0, 3, 7, 10, 17, 21],
+  "m7(11,13)": [0, 3, 7, 10, 17, 21],
+  "m7/11/13": [0, 3, 7, 10, 17, 21],
+  "-(maj7)": [0, 3, 7, 11],
+  "-7M": [0, 3, 7, 11],
+  "-maj7": [0, 3, 7, 11],
+  "-∆7": [0, 3, 7, 11],
+  "m(maj7)": [0, 3, 7, 11],
+  "mM7": [0, 3, 7, 11],
+  "min(maj7)": [0, 3, 7, 11],
+  "-9+7": [0, 3, 7, 11, 13],
+  "-(maj9)": [0, 3, 7, 11, 14],
+  "-7M(9)": [0, 3, 7, 11, 14],
+  "-maj9": [0, 3, 7, 11, 14],
+  "-∆9": [0, 3, 7, 11, 14],
+  "m(maj9)": [0, 3, 7, 11, 14],
+  "mM9": [0, 3, 7, 11, 14],
+  "min(maj9)": [0, 3, 7, 11, 14],
+  "-11": [0, 3, 7, 11, 14, 17],
+  "m11": [0, 3, 7, 11, 14, 17],
+  "-addb9": [0, 3, 7, 13],
+  "maddb9": [0, 3, 7, 13],
+  "-add9": [0, 3, 7, 14],
+  "madd9": [0, 3, 7, 14],
+  "-add11": [0, 3, 7, 17],
+  "madd11": [0, 3, 7, 17],
+  "-add#11": [0, 3, 7, 18],
+  "madd#11": [0, 3, 7, 18],
+  // altered minor chords
+  "-#5": [0, 3, 8],
+  "-(#5)": [0, 3, 8],
+  "m#5": [0, 3, 8],
+  "m(#5)": [0, 3, 8],
+  "-7#5": [0, 3, 8, 10],
+  "-7(#5)": [0, 3, 8, 10],
+  "dim7(b13)": [0, 3, 9, 20],
+  "°7(b13)": [0, 3, 9, 20],
+  "˚7(b13)": [0, 3, 9, 20],
+  // altered major chords
+  "add4": [0, 4, 5, 7],
+  "maj(b5)": [0, 4, 6],
+  "majb5": [0, 4, 6],
+  "add#4": [0, 4, 6, 7],
+  "7(b5)": [0, 4, 6, 10],
+  "7b5": [0, 4, 6, 10],
+  "7(b5,b9)": [0, 4, 6, 10, 13],
+  "7(b9,b5)": [0, 4, 6, 10, 13],
+  "7b5(b9)": [0, 4, 6, 10, 13],
+  "7b9,b5": [0, 4, 6, 10, 13],
+  "7b9b5": [0, 4, 6, 10, 13],
+  "7(b5,b9,b13)": [0, 4, 6, 10, 13, 20],
+  "7/b5/b9/b13": [0, 4, 6, 10, 13, 20],
+  "7b5/b9/b13": [0, 4, 6, 10, 13, 20],
+  "7(b5,b9,13)": [0, 4, 6, 10, 13, 21],
+  "7/b5/b9/13": [0, 4, 6, 10, 13, 21],
+  "7b5/b9/13": [0, 4, 6, 10, 13, 21],
+  "7(9,b5)": [0, 4, 6, 10, 14],
+  "7(b5,9)": [0, 4, 6, 10, 14],
+  "7b5(9)": [0, 4, 6, 10, 14],
+  "9b5": [0, 4, 6, 10, 14],
+  "13(b5)": [0, 4, 6, 10, 14, 21],
+  "13b5": [0, 4, 6, 10, 14, 21],
+  "7(b5,9,13)": [0, 4, 6, 10, 14, 21],
+  "7/b5/9/13": [0, 4, 6, 10, 14, 21],
+  "7b5/9/13": [0, 4, 6, 10, 14, 21],
+  "7#9b5": [0, 4, 6, 10, 15],
+  "7(#9,b5)": [0, 4, 6, 10, 15],
+  "7(b5,#9)": [0, 4, 6, 10, 15],
+  "7b5(#9)": [0, 4, 6, 10, 15],
+  "7(b5,#9,b13)": [0, 4, 6, 10, 15, 20],
+  "7/b5/#9/b13": [0, 4, 6, 10, 15, 20],
+  "7b5/#9/b13": [0, 4, 6, 10, 15, 20],
+  "7(b5,#9,13)": [0, 4, 6, 10, 15, 21],
+  "7/b5/#9/13": [0, 4, 6, 10, 15, 21],
+  "7b5/#9/13": [0, 4, 6, 10, 15, 21],
+  "7(b5,b13)": [0, 4, 6, 10, 20],
+  "7/b5/b13": [0, 4, 6, 10, 20],
+  "7b5/b13": [0, 4, 6, 10, 20],
+  "7(b5,13)": [0, 4, 6, 10, 21],
+  "7/b5/13": [0, 4, 6, 10, 21],
+  "7b5(13)": [0, 4, 6, 10, 21],
+  "7b5/13": [0, 4, 6, 10, 21],
+  "7M(b5)": [0, 4, 6, 11],
+  "maj7(b5)": [0, 4, 6, 11],
+  "maj7b5": [0, 4, 6, 11],
+  "7M(b5,9)": [0, 4, 6, 11, 14],
+  "maj7(b5,9)": [0, 4, 6, 11, 14],
+  "maj7b5/9": [0, 4, 6, 11, 14],
+  "7M(b5,9,13)": [0, 4, 6, 11, 14, 21],
+  "maj7(b5,9,13)": [0, 4, 6, 11, 14, 21],
+  "maj7b5/9/13": [0, 4, 6, 11, 14, 21],
+  "7M(b5,13)": [0, 4, 6, 11, 21],
+  "maj7(b5,13)": [0, 4, 6, 11, 21],
+  "maj7b5/13": [0, 4, 6, 11, 21],
+  // major chords
+  "M": [0, 4, 7],
+  "Δ": [0, 4, 7],
+  "∆": [0, 4, 7],
+  "6": [0, 4, 7, 9],
+  "6(9)": [0, 4, 7, 9, 14],
+  "6/9": [0, 4, 7, 9, 14],
+  "69": [0, 4, 7, 9, 14],
+  "6add9": [0, 4, 7, 9, 14],
+  "6(9,11)": [0, 4, 7, 9, 14, 17],
+  "6/9/11": [0, 4, 7, 9, 14, 17],
+  "6911": [0, 4, 7, 9, 14, 17],
+  "6(9,#11)": [0, 4, 7, 9, 14, 18],
+  "6/9/#11": [0, 4, 7, 9, 14, 18],
+  "69#11": [0, 4, 7, 9, 14, 18],
+  "6(11)": [0, 4, 7, 9, 17],
+  "6/11": [0, 4, 7, 9, 17],
+  "611": [0, 4, 7, 9, 17],
+  "6#11": [0, 4, 7, 9, 18],
+  "6(#11)": [0, 4, 7, 9, 18],
+  "6/#11": [0, 4, 7, 9, 18],
+  "7": [0, 4, 7, 10],
+  "7(b9)": [0, 4, 7, 10, 13],
+  "7b9": [0, 4, 7, 10, 13],
+  "7(9)": [0, 4, 7, 10, 14],
+  "7/9": [0, 4, 7, 10, 14],
+  "9": [0, 4, 7, 10, 14],
+  "7(9,11)": [0, 4, 7, 10, 14, 17],
+  "7/9/11": [0, 4, 7, 10, 14, 17],
+  "7(9,11,13)": [0, 4, 7, 10, 14, 17, 21],
+  "7/9/11/13": [0, 4, 7, 10, 14, 17, 21],
+  "7#11": [0, 4, 7, 10, 14, 18],
+  "7(#11)": [0, 4, 7, 10, 14, 18],
+  "9#11": [0, 4, 7, 10, 14, 18],
+  "9(#11)": [0, 4, 7, 10, 14, 18],
+  "(13)": [0, 4, 7, 10, 14, 21],
+  "13": [0, 4, 7, 10, 14, 21],
+  "7(9,13)": [0, 4, 7, 10, 14, 21],
+  "7/9/13": [0, 4, 7, 10, 14, 21],
+  "9/13": [0, 4, 7, 10, 14, 21],
+  "7#9": [0, 4, 7, 10, 15],
+  "7(#9)": [0, 4, 7, 10, 15],
+  "7(#9,b13)": [0, 4, 7, 10, 15, 20],
+  "7(11)": [0, 4, 7, 10, 17],
+  "7/11": [0, 4, 7, 10, 17],
+  "7(11,13)": [0, 4, 7, 10, 17, 21],
+  "7/11/13": [0, 4, 7, 10, 17, 21],
+  "13#11": [0, 4, 7, 10, 18, 21],
+  "13(#11)": [0, 4, 7, 10, 18, 21],
+  "7(b13)": [0, 4, 7, 10, 20],
+  "7b13": [0, 4, 7, 10, 20],
+  "7(13)": [0, 4, 7, 10, 21],
+  "7/13": [0, 4, 7, 10, 21],
+  "7M": [0, 4, 7, 11],
+  "maj7": [0, 4, 7, 11],
+  "Δ7": [0, 4, 7, 11],
+  "∆7": [0, 4, 7, 11],
+  "7M(9)": [0, 4, 7, 11, 14],
+  "7M/9": [0, 4, 7, 11, 14],
+  "maj7(9)": [0, 4, 7, 11, 14],
+  "maj7/9": [0, 4, 7, 11, 14],
+  "maj9": [0, 4, 7, 11, 14],
+  "Δ9": [0, 4, 7, 11, 14],
+  "∆9": [0, 4, 7, 11, 14],
+  "7M(9,11)": [0, 4, 7, 11, 14, 17],
+  "7M/9/11": [0, 4, 7, 11, 14, 17],
+  "maj11": [0, 4, 7, 11, 14, 17],
+  "maj7(9,11)": [0, 4, 7, 11, 14, 17],
+  "maj7/9/11": [0, 4, 7, 11, 14, 17],
+  "Δ11": [0, 4, 7, 11, 14, 17],
+  "∆11": [0, 4, 7, 11, 14, 17],
+  "7M(9,11,13)": [0, 4, 7, 11, 14, 17, 21],
+  "7M/9/11/13": [0, 4, 7, 11, 14, 17, 21],
+  "maj13": [0, 4, 7, 11, 14, 17, 21],
+  "maj7(9,11,13)": [0, 4, 7, 11, 14, 17, 21],
+  "maj7/9/11/13": [0, 4, 7, 11, 14, 17, 21],
+  "Δ11(13)": [0, 4, 7, 11, 14, 17, 21],
+  "Δ13": [0, 4, 7, 11, 14, 17, 21],
+  "∆11(13)": [0, 4, 7, 11, 14, 17, 21],
+  "7M(9,#11)": [0, 4, 7, 11, 14, 18],
+  "7M/9/#11": [0, 4, 7, 11, 14, 18],
+  "maj7(9,#11)": [0, 4, 7, 11, 14, 18],
+  "maj7/9/#11": [0, 4, 7, 11, 14, 18],
+  "maj9#11": [0, 4, 7, 11, 14, 18],
+  "maj9(#11)": [0, 4, 7, 11, 14, 18],
+  "maj9/#11": [0, 4, 7, 11, 14, 18],
+  "Δ9(#11)": [0, 4, 7, 11, 14, 18],
+  "7M(9,#11,13)": [0, 4, 7, 11, 14, 18, 21],
+  "7M/9/#11/13": [0, 4, 7, 11, 14, 18, 21],
+  "maj13#11": [0, 4, 7, 11, 14, 18, 21],
+  "maj13(#11)": [0, 4, 7, 11, 14, 18, 21],
+  "maj13/#11": [0, 4, 7, 11, 14, 18, 21],
+  "Δ13(#11)": [0, 4, 7, 11, 14, 18, 21],
+  "∆13(#11)": [0, 4, 7, 11, 14, 18, 21],
+  "7M(9,13)": [0, 4, 7, 11, 14, 21],
+  "7M/9/13": [0, 4, 7, 11, 14, 21],
+  "maj7(9,13)": [0, 4, 7, 11, 14, 21],
+  "maj7/9/13": [0, 4, 7, 11, 14, 21],
+  "maj9(13)": [0, 4, 7, 11, 14, 21],
+  "Δ9(13)": [0, 4, 7, 11, 14, 21],
+  "∆9(13)": [0, 4, 7, 11, 14, 21],
+  "7M(11)": [0, 4, 7, 11, 17],
+  "7M/11": [0, 4, 7, 11, 17],
+  "maj7(11)": [0, 4, 7, 11, 17],
+  "maj7/11": [0, 4, 7, 11, 17],
+  "Δ7(11)": [0, 4, 7, 11, 17],
+  "∆7(11)": [0, 4, 7, 11, 17],
+  "7M(#11)": [0, 4, 7, 11, 18],
+  "7M/#11": [0, 4, 7, 11, 18],
+  "maj7(#11)": [0, 4, 7, 11, 18],
+  "maj7/#11": [0, 4, 7, 11, 18],
+  "Δ7(#11)": [0, 4, 7, 11, 18],
+  "∆7(#11)": [0, 4, 7, 11, 18],
+  "7M(13)": [0, 4, 7, 11, 21],
+  "7M/13": [0, 4, 7, 11, 21],
+  "maj7(13)": [0, 4, 7, 11, 21],
+  "maj7/13": [0, 4, 7, 11, 21],
+  "Δ7(13)": [0, 4, 7, 11, 21],
+  "∆7(13)": [0, 4, 7, 11, 21],
+  "addb9": [0, 4, 7, 13],
+  "add9": [0, 4, 7, 14],
+  "add#9": [0, 4, 7, 15],
+  "add11": [0, 4, 7, 17],
+  "add#11": [0, 4, 7, 18],
+  // augmented chords
+  "+": [0, 4, 8],
+  "aug": [0, 4, 8],
+  "+7": [0, 4, 8, 10],
+  "7#5": [0, 4, 8, 10],
+  "7(#5)": [0, 4, 8, 10],
+  "7+5": [0, 4, 8, 10],
+  "aug7": [0, 4, 8, 10],
+  "7(b9,#5)": [0, 4, 8, 10, 13],
+  "7b9#5": [0, 4, 8, 10, 13],
+  "9#5": [0, 4, 8, 10, 14],
+  "9(#5)": [0, 4, 8, 10, 14],
+  "9+5": [0, 4, 8, 10, 14],
+  "13#5": [0, 4, 8, 10, 14, 21],
+  "13(#5)": [0, 4, 8, 10, 14, 21],
+  "7M(#5)": [0, 4, 8, 11],
+  "maj7#5": [0, 4, 8, 11],
+  "maj7(#5)": [0, 4, 8, 11],
+  "7M(#5,9)": [0, 4, 8, 11, 14],
+  "maj7#5/9": [0, 4, 8, 11, 14],
+  "maj7(#5,9)": [0, 4, 8, 11, 14],
+  "maj7#5#11": [0, 4, 8, 11, 18],
+  "maj7(#5,#11)": [0, 4, 8, 11, 18],
+  // sus4 chords
+  "sus": [0, 5, 7],
+  "sus4": [0, 5, 7],
+  "-7sus4": [0, 5, 7, 10],
+  "7sus": [0, 5, 7, 10],
+  "7sus4": [0, 5, 7, 10],
+  "m7sus4": [0, 5, 7, 10],
+  "min7sus4": [0, 5, 7, 10],
+  "7sus(b9)": [0, 5, 7, 10, 13],
+  "7sus4(b9)": [0, 5, 7, 10, 13],
+  "-9sus4": [0, 5, 7, 10, 14],
+  "7sus4(9)": [0, 5, 7, 10, 14],
+  "7sus4/9": [0, 5, 7, 10, 14],
+  "9sus": [0, 5, 7, 10, 14],
+  "9sus4": [0, 5, 7, 10, 14],
+  "m9sus4": [0, 5, 7, 10, 14],
+  "min9sus4": [0, 5, 7, 10, 14],
+  "11sus4": [0, 5, 7, 10, 14, 17],
+  "13sus4": [0, 5, 7, 10, 14, 21],
+  "7sus(#9)": [0, 5, 7, 10, 15],
+  "7sus4(#9)": [0, 5, 7, 10, 15],
+  "7sus4(11)": [0, 5, 7, 10, 17],
+  "7sus4(13)": [0, 5, 7, 10, 21],
+  "7Msus": [0, 5, 7, 11],
+  "7Msus4": [0, 5, 7, 11],
+  "maj7sus": [0, 5, 7, 11],
+  "maj7sus4": [0, 5, 7, 11],
+  // power chords and unusual chords
+  "#4": [0, 6],
+  "b5": [0, 6],
+  "sus#4": [0, 6, 7],
+  "7Msus#4": [0, 6, 11],
+  "maj7sus#4": [0, 6, 11],
+  "5": [0, 7],
+  "11": [0, 7, 10, 14, 17],
+  "5(8)": [0, 7, 12],
+  "5add8": [0, 7, 12],
+  "5(9)": [0, 7, 14],
+  "5add9": [0, 7, 14],
+  "#5": [0, 8],
+  "b6": [0, 8]
 };
 ChordTrack.prototype.rhythmPatterns = {
   "2/2": ['boom', '', '', '', 'chick', '', '', ''],
@@ -15182,7 +15490,14 @@ function CreateSynth() {
         // There might be a previous run that needs to be turned off.
         self.stop();
         var noteMapTracks = createNoteMap(self.flattened);
-        if (self.options.swing) addSwing(noteMapTracks, self.options.swing, self.meterFraction, self.pickupLength);
+        if (self.options.swing) {
+          // If we have a drum intro, then the pickup is already incorporated into the beat.
+          // That is, without a drum intro, the first note starts at 0 whether it
+          // is a pickup or not. With a drum intro, the first note will be in its
+          // proper place.
+          var pickupLength = self.options.drumIntro ? 0 : self.pickupLength;
+          addSwing(noteMapTracks, self.options.swing, self.meterFraction, pickupLength);
+        }
         if (self.sequenceCallback) self.sequenceCallback(noteMapTracks, self.callbackContext);
         var panDistances = setPan(noteMapTracks.length, self.pan);
 
@@ -15395,7 +15710,7 @@ function CreateSynth() {
   };
   function addSwing(noteMapTracks, swing, meterFraction, pickupLength) {
     // we can only swing in X/4 and X/8 meters.
-    if (meterFraction.den != 4 && meterFraction.den != 8) return;
+    if (meterFraction.den !== 4 && meterFraction.den !== 8) return;
     swing = parseFloat(swing);
 
     // 50 (or less) is no swing, 
@@ -15413,7 +15728,7 @@ function CreateSynth() {
     // could be also in the settings. Try out values such 0.1, 0.2
     var volumeIncrease = 0.0;
 
-    // the beatLength in X/8 meters
+    // the beatLength in X/4 meters
     var beatLength = 0.25;
 
     // in X/8 meters the 16s swing so the beatLength is halved
@@ -15430,11 +15745,11 @@ function CreateSynth() {
         var event = track[i];
         if (
         // is halfbeat
-        (event.start - pickupLength) % halfbeatLength == 0 && (event.start - pickupLength) % beatLength != 0 && (
+        (event.start - pickupLength) % halfbeatLength === 0 && (event.start - pickupLength) % beatLength !== 0 && (
         // the previous note is on the beat or before OR there is no previous note 
-        i == 0 || track[i - 1].start <= track[i].start - halfbeatLength) && (
+        i === 0 || track[i - 1].start <= track[i].start - halfbeatLength) && (
         // the next note is on the beat or after OR there is no next note
-        i == track.length - 1 || track[i + 1].start >= track[i].start + halfbeatLength)) {
+        i === track.length - 1 || track[i + 1].start >= track[i].start + halfbeatLength)) {
           var oldEventStart = event.start;
           event.start += swingDuration;
 
@@ -15443,7 +15758,7 @@ function CreateSynth() {
 
           // if there is a previous note ending at the start of this note, extend its end
           // and decrease its volume
-          if (i > 0 && track[i - 1].end == oldEventStart) {
+          if (i > 0 && track[i - 1].end === oldEventStart) {
             track[i - 1].end = event.start;
             track[i - 1].volume *= 1 - volumeIncrease;
           }
@@ -16181,14 +16496,14 @@ function Repeats(voice) {
         index: thisIndex
       });
     }
-    if (isStartRepeat) this.sections.push({
-      type: "startRepeat",
-      index: thisIndex
-    });
     if (startEnding) this.sections.push({
       type: "startEnding",
       index: thisIndex,
       endings: startEnding
+    });
+    if (isStartRepeat) this.sections.push({
+      type: "startRepeat",
+      index: thisIndex
     });
   };
   this.resolveRepeats = function () {
@@ -16991,11 +17306,20 @@ function buildPatterns(self) {
   if (self.capo > 0) {
     tuning = self.capoTuning;
   }
+  var pitches = self.stringPitches; // already computed, capo-aware
   var pos = tuning.length - 1;
   for (var iii = 0; iii < tuning.length; iii++) {
-    var nextNote = self.highestNote; // highest handled note
-    if (iii != tuning.length - 1) {
-      nextNote = tuning[iii + 1];
+    var myPitch = pitches[iii];
+    var nextNote = self.highestNote; // fallback: this string has no higher neighbor
+    var bestHigherIdx = -1;
+    for (var kkk = 0; kkk < tuning.length; kkk++) {
+      if (kkk === iii) continue;
+      if (pitches[kkk] > myPitch && (bestHigherIdx === -1 || pitches[kkk] < pitches[bestHigherIdx])) {
+        bestHigherIdx = kkk;
+      }
+    }
+    if (bestHigherIdx !== -1) {
+      nextNote = tuning[bestHigherIdx];
     }
     var stringNotes = tabNotes(tuning[iii], nextNote);
     if (stringNotes.error) {
@@ -17014,73 +17338,193 @@ function buildSecond(first) {
   }
   return seconds;
 }
-function sameString(self, chord) {
-  for (var jjjj = 0; jjjj < chord.length - 1; jjjj++) {
-    var curPos = chord[jjjj];
-    var nextPos = chord[jjjj + 1];
-    if (curPos.str == nextPos.str) {
-      // same String
-      // => change lower pos 
-      if (curPos.str == self.strings.length - 1) {
-        // Invalid tab Chord position for instrument
-        curPos.num = "?";
-        nextPos.num = "?";
-        return;
-      }
-      // change lower pitch on lowest string
-      if (nextPos.num < curPos.num) {
-        nextPos.str++;
-        nextPos = noteToNumber(self, nextPos.note, nextPos.str, self.secondPos, self.strings[nextPos.str].length);
-      } else {
-        curPos.str++;
-        curPos = noteToNumber(self, curPos.note, curPos.str, self.secondPos, self.strings[curPos.str].length);
-      }
-      // update table
-      chord[jjjj] = curPos;
-      chord[jjjj + 1] = nextPos;
+function computeStringCandidates(self, note) {
+  // Every string this note can physically be played on (fret >= 0),
+  // independent of tuning order -- required for reentrant tunings.
+  var pitch = note.pitch + note.pitchAltered;
+  if (note.quarter === '^') pitch -= 0.5;else if (note.quarter === "v") pitch += 0.5;
+  var candidates = [];
+  for (var i = 0; i < self.stringPitches.length; i++) {
+    var fret = pitch - self.stringPitches[i];
+    if (fret >= 0) {
+      candidates.push({
+        arrIndex: i,
+        num: Math.round(fret)
+      });
     }
   }
-  return null;
+  candidates.sort(function (a, b) {
+    return a.num - b.num;
+  });
+  return candidates;
+}
+function bestChordAssignment(candidateLists) {
+  // Finds the note->string bijection (one note per distinct string)
+  // that minimizes the worst fret used, tie-broken by fret spread,
+  // then by total fret sum. Brute-force backtracking: chords rarely
+  // exceed 6 notes, so this is cheap regardless of tuning shape.
+  var n = candidateLists.length;
+  var usedStrings = {};
+  var current = new Array(n);
+  var best = null,
+    bestCost = null;
+  function cost(assignment) {
+    var max = -Infinity,
+      min = Infinity,
+      sum = 0;
+    for (var i = 0; i < assignment.length; i++) {
+      var f = assignment[i].num;
+      if (f > max) max = f;
+      if (f < min) min = f;
+      sum += f;
+    }
+    return {
+      max: max,
+      spread: max - min,
+      sum: sum
+    };
+  }
+  function better(a, b) {
+    if (a.max !== b.max) return a.max < b.max;
+    if (a.spread !== b.spread) return a.spread < b.spread;
+    return a.sum < b.sum;
+  }
+  function backtrack(noteIdx) {
+    if (noteIdx === n) {
+      var c = cost(current);
+      if (!best || better(c, bestCost)) {
+        best = current.slice();
+        bestCost = c;
+      }
+      return;
+    }
+    var cands = candidateLists[noteIdx];
+    for (var ii = 0; ii < cands.length; ii++) {
+      var cand = cands[ii];
+      if (usedStrings[cand.arrIndex]) continue;
+      usedStrings[cand.arrIndex] = true;
+      current[noteIdx] = cand;
+      backtrack(noteIdx + 1);
+      usedStrings[cand.arrIndex] = false;
+    }
+  }
+  backtrack(0);
+  return best; // null if no complete valid assignment exists
+}
+
+function bestPartialChordAssignment(candidateLists) {
+  // Same search as bestChordAssignment, but allows leaving some notes
+  // unplaced rather than requiring every note to get a distinct string.
+  // Used when no complete bijection exists (more notes competing for a
+  // string range than there are strings to hold them) -- maximizes the
+  // number of notes placed on distinct strings, then applies the same
+  // worst-fret / spread / sum tie-break among assignments of that size.
+  var n = candidateLists.length;
+  var usedStrings = {};
+  var current = new Array(n);
+  var best = null,
+    bestPlaced = -1,
+    bestCost = null;
+  function cost(assignment) {
+    var max = -Infinity,
+      min = Infinity,
+      sum = 0,
+      count = 0;
+    for (var i = 0; i < assignment.length; i++) {
+      if (!assignment[i]) continue;
+      count++;
+      var f = assignment[i].num;
+      if (f > max) max = f;
+      if (f < min) min = f;
+      sum += f;
+    }
+    return {
+      max: max,
+      spread: max - min,
+      sum: sum,
+      count: count
+    };
+  }
+  function better(a, b) {
+    if (a.count !== b.count) return a.count > b.count; // place more notes, always
+    if (a.max !== b.max) return a.max < b.max;
+    if (a.spread !== b.spread) return a.spread < b.spread;
+    return a.sum < b.sum;
+  }
+  function backtrack(noteIdx) {
+    if (noteIdx === n) {
+      var c = cost(current);
+      if (!best || better(c, bestCost)) {
+        best = current.slice();
+        bestCost = c;
+      }
+      return;
+    }
+    var cands = candidateLists[noteIdx];
+    var placedAny = false;
+    for (var ii = 0; ii < cands.length; ii++) {
+      var cand = cands[ii];
+      if (usedStrings[cand.arrIndex]) continue;
+      placedAny = true;
+      usedStrings[cand.arrIndex] = true;
+      current[noteIdx] = cand;
+      backtrack(noteIdx + 1);
+      usedStrings[cand.arrIndex] = false;
+      current[noteIdx] = null;
+    }
+    // Also explore leaving this note unplaced, so a single hard note
+    // doesn't block otherwise-good placements for the others.
+    current[noteIdx] = null;
+    backtrack(noteIdx + 1);
+  }
+  backtrack(0);
+  return best;
 }
 function handleChordNotes(self, notes) {
-  var retNotes = [];
+  var activeNotes = [];
   for (var iiii = 0; iiii < notes.length; iiii++) {
     if (notes[iiii].endTie) continue;
     var note = new TabNote(notes[iiii].name, self.clefTranspose);
     note.checkKeyAccidentals(self.accidentals, self.measureAccidentals);
-    var curPos = toNumber(self, note);
-    retNotes.push(curPos);
+    activeNotes.push(note);
   }
-  sameString(self, retNotes);
+  if (activeNotes.length === 0) return [];
+  var numStrings = self.stringPitches.length;
+  if (activeNotes.length > numStrings) {
+    // Physically impossible (more simultaneous notes than strings) --
+    // no valid bijection can exist. Fall back to independent placement.
+    return activeNotes.map(function (n) {
+      return toNumber(self, n);
+    });
+  }
+  var candidateLists = activeNotes.map(function (n) {
+    return computeStringCandidates(self, n);
+  });
+  var assignment = bestChordAssignment(candidateLists);
+  if (!assignment) {
+    assignment = bestPartialChordAssignment(candidateLists);
+  }
+  var retNotes = [];
+  for (var jj = 0; jj < activeNotes.length; jj++) {
+    var chosen = assignment[jj];
+    if (chosen) {
+      retNotes.push({
+        num: chosen.num,
+        str: numStrings - 1 - chosen.arrIndex,
+        note: activeNotes[jj]
+      });
+    } else {
+      // No string could be found for this note without colliding with a
+      // higher-priority placement -- this note is not physically playable
+      // as a distinct string in this chord voicing on this instrument.
+      retNotes.push({
+        num: "?",
+        str: -1,
+        note: activeNotes[jj]
+      });
+    }
+  }
   return retNotes;
-}
-function noteToNumber(self, note, stringNumber, secondPosition, firstSize) {
-  var strings = self.strings;
-  note.checkKeyAccidentals(self.accidentals, self.measureAccidentals);
-  if (secondPosition) {
-    strings = secondPosition;
-  }
-  var noteName = note.emitNoAccidentals();
-  var num = strings[stringNumber].indexOf(noteName);
-  var acc = note.acc;
-  if (num != -1) {
-    if (secondPosition) {
-      num += firstSize;
-    }
-    if ((note.isFlat || note.acc == -1) && num == 0) {
-      // flat on 0 pos => previous string 7th position
-      var noteEquiv = note.getAccidentalEquiv();
-      stringNumber++;
-      num = strings[stringNumber].indexOf(noteEquiv.emit());
-      acc = 0;
-    }
-    return {
-      num: num + acc,
-      str: stringNumber,
-      note: note
-    };
-  }
-  return null;
 }
 function toNumber(self, note) {
   if (note.isAltered || note.natural) {
@@ -17092,21 +17536,45 @@ function toNumber(self, note) {
     } else if (note.natural) acc = "=";
     self.measureAccidentals[note.name.toUpperCase()] = acc;
   }
-  for (var i = self.stringPitches.length - 1; i >= 0; i--) {
-    if (note.pitch + note.pitchAltered >= self.stringPitches[i]) {
-      var num = note.pitch + note.pitchAltered - self.stringPitches[i];
-      if (note.quarter === '^') num -= 0.5;else if (note.quarter === "v") num += 0.5;
-      return {
-        num: Math.round(num),
-        str: self.stringPitches.length - 1 - i,
-        // reverse the strings because string 0 is on the bottom
-        note: note
-      };
+  var pitch = note.pitch + note.pitchAltered;
+  if (note.quarter === '^') pitch -= 0.5;else if (note.quarter === "v") pitch += 0.5;
+
+  // Check every string, independent of array order -- required for
+  // reentrant tunings (ukulele high-G etc). Collect every string on
+  // which this pitch is physically playable (fret >= 0).
+  var candidates = [];
+  for (var i = 0; i < self.stringPitches.length; i++) {
+    var fret = pitch - self.stringPitches[i];
+    if (fret >= 0) {
+      candidates.push({
+        arrIndex: i,
+        num: fret
+      });
     }
   }
+  if (candidates.length === 0) {
+    return {
+      num: "?",
+      str: self.stringPitches.length - 1,
+      note: note
+    };
+  }
+
+  // Prefer the lowest fret; on ties, prefer the string closest to the
+  // one used for the previous note, to avoid needless jumps across the tab.
+  candidates.sort(function (a, b) {
+    if (a.num !== b.num) return a.num - b.num;
+    if (self.lastArrIndex != null) {
+      return Math.abs(a.arrIndex - self.lastArrIndex) - Math.abs(b.arrIndex - self.lastArrIndex);
+    }
+    return 0;
+  });
+  var chosen = candidates[0];
+  self.lastArrIndex = chosen.arrIndex;
   return {
-    num: "?",
-    str: self.stringPitches.length - 1,
+    num: Math.round(chosen.num),
+    str: self.stringPitches.length - 1 - chosen.arrIndex,
+    // unchanged display-order convention
     note: note
   };
 }
@@ -17233,6 +17701,7 @@ function StringPatterns(plugin) {
   }
   this.transpose = plugin.transpose ? plugin.transpose : 0;
   this.tuning = tuning;
+  this.lastArrIndex = null;
   this.stringPitches = [];
   for (var i = 0; i < this.tuning.length; i++) {
     var pitch = noteToMidi(this.tuning[i]) + this.capo;
@@ -17964,7 +18433,7 @@ TabAbsoluteElements.prototype.build = function (plugin, staffAbsolute, tabVoice,
               tabVoice.push(defGrace);
             }
           }
-          var tabNoteRelative = buildRelativeTabNote(plugin, abs.x + absChild.heads[ll].dx, defNote, curNote, false);
+          var tabNoteRelative = buildRelativeTabNote(plugin, abs.x, defNote, curNote, false);
           abs.children.push(tabNoteRelative);
         }
         if (defNote.notes.length > 0) {
@@ -23664,7 +24133,7 @@ function printLine(renderer, x1, x2, y, klass, name, dy) {
   var y1 = roundNumber(y - dy);
   var y2 = roundNumber(y + dy);
   // TODO-PER: This fixes a firefox bug where it isn't displayed
-  if (renderer.firefox112) {
+  if (renderer.firefox) {
     y += dy / 2; // Because the y coordinate is the edge of where the line goes but the width widens from the middle.
     var attr = {
       x1: x1,
@@ -23728,7 +24197,7 @@ function printStem(renderer, x, dx, y1, y2, klass, name) {
   x = roundNumber(x);
   var x2 = roundNumber(x + dx);
   // TODO-PER: This fixes a firefox bug where it isn't displayed
-  if (renderer.firefox112) {
+  if (renderer.firefox) {
     x += dx / 2; // Because the x coordinate is the edge of where the line goes but the width widens from the middle.
     var attr = {
       x1: x,
@@ -25358,7 +25827,7 @@ function splitSvgIntoLines(renderer, output, title, responsive, scale) {
     if (responsive !== 'resize') svg.setAttribute("height", height);
     if (responsive === 'resize') svg.style.position = '';
     // TODO-PER: Hack! Not sure why this is needed.
-    var viewBoxHeight = renderer.firefox112 ? height + 1 : height;
+    var viewBoxHeight = renderer.firefox ? height + 1 : height;
     svg.setAttribute("viewBox", "0 " + nextTop + " " + width + " " + viewBoxHeight);
     svg.appendChild(style.cloneNode(true));
     var titleEl = document.createElement("title");
@@ -27644,7 +28113,7 @@ var Renderer = function Renderer(paper) {
   this.space = 3 * spacing.SPACE;
   this.padding = {}; // renderer's padding is managed by the controller
   this.reset();
-  this.firefox112 = navigator.userAgent.indexOf('Firefox/112.0') >= 0;
+  this.firefox = navigator.userAgent.indexOf('Firefox/') >= 0;
 };
 Renderer.prototype.reset = function () {
   this.paper.clear();
@@ -27753,6 +28222,7 @@ Renderer.prototype.initVerticalSpace = function () {
   are automatic.
   <float> must be between 0 (natural spacing)
   and 1 (max shrinking).
+  
   // This next value is used to compute the natural spacing of
   // the notes. The base spacing of the crotchet is always
   // 40 pts. When the duration of a note type is twice the
@@ -27764,7 +28234,9 @@ Renderer.prototype.initVerticalSpace = function () {
   // semiquaver is 20 pts.
   // Setting this value to 1 sets all note spacing to 40 pts.
   noteSpacingFactor: 1.414, // Set the note spacing factor to <float> (range 1..2).
+  
   scale <float> Default: 0.75 Set the page scale factor. Note that the header and footer are not scaled.
+  
   stretchlast <float>Default: 0.8
   Stretch the last music line of a tune when it exceeds
   the <float> fraction of the page width.
@@ -28192,7 +28664,7 @@ module.exports = Svg;
   \********************/
 /***/ (function(module) {
 
-var version = '6.6.3';
+var version = '6.6.4';
 module.exports = version;
 
 /***/ })
