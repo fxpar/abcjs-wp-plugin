@@ -31,11 +31,14 @@ function abcjs_conditionally_load_resources( $posts ) {
 		}
 	}
 
+
+// 'https://cdn.jsdelivr.net/npm/abcjs@6.6.3/dist/abcjs-basic-min.js', 
 	if ( $has_abcjs ) {
 		// Load from CDN
 		wp_enqueue_script( 
 			'abcjs-plugin', 
-			'https://cdn.jsdelivr.net/npm/abcjs@6.6.3/dist/abcjs-basic-min.js', 
+			
+			'https://fxpar.github.io/abcjs-wp-plugin/abcjs-basic.js',
 			array(), 
 			'6.1.4', 
 			false
